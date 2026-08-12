@@ -1,0 +1,18 @@
+# Build artifacts
+/build/
+*.o
+*.obj
+*.exe
+
+# Models (large binaries — documented separately, not committed raw)
+*.onnx
+*.weights
+*.pt
+
+# Dataset (large, not committed — see scripts/ for fetch instructions)
+/data/
+
+# OS/editor
+.DS_Store
+*.swp
+.vscode/

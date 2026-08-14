@@ -35,6 +35,10 @@ target_link_libraries(edgeguard PRIVATE edgeguard_core)
 add_executable(edgeguard_bench src/bench.cpp)
 target_link_libraries(edgeguard_bench PRIVATE edgeguard_core)
 
+# --- evaluation harness (mAP over a full validation split) ---
+add_executable(edgeguard_eval src/eval.cpp)
+target_link_libraries(edgeguard_eval PRIVATE edgeguard_core)
+
 # --- tests ---
 enable_testing()
 find_package(Catch2 3 REQUIRED)

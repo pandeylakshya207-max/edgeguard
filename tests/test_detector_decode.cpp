@@ -1,0 +1,78 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include <opencv2/core.hpp>
+
+#include "edgeguard/detector.hpp"
+
+using edgeguard::decodeYoloOutput;
+using Catch::Approx;
+
+// Builds a synthetic YOLOv8-shaped output tensor: (4+numClasses) rows x
+// numAnchors columns, so decodeYoloOutput can be tested against known,
+// hand-picked values without ever needing a real model file.
+static cv::Mat makeOutput(int numClasses, int numAnchors) {
+    return cv::Mat::zeros(4 + numClasses, numAnchors, CV_32F);
+}
+
+TEST_CASE("decodeYoloOutput extracts a single confident detection correctly", "[detector]") {
+    cv::Mat out = makeOutput(/*numClasses=*/2, /*numAnchors=*/1);
+    out.at<float>(0, 0) = 100.0f;  // cx
+    out.at<float>(1, 0) = 100.0f;  // cy
+    out.at<float>(2, 0) = 50.0f;   // w
+    out.at<float>(3, 0) = 80.0f;   // h
+    out.at<float>(4, 0) = 0.1f;    // class 0 score
+    out.at<float>(5, 0) = 0.9f;    // class 1 score — the winner
+
+    auto boxes = decodeYoloOutput(out, /*confThreshold=*/0.5f);
+    REQUIRE(boxes.size() == 1);
+    REQUIRE(boxes[0].classId == 1);
+    REQUIRE(boxes[0].confidence == Approx(0.9f));
+    REQUIRE(boxes[0].x1 == Approx(75.0f));   // 100 - 50/2
+    REQUIRE(boxes[0].y1 == Approx(60.0f));   // 100 - 80/2
+    REQUIRE(boxes[0].x2 == Approx(125.0f));  // 100 + 50/2
+    REQUIRE(boxes[0].y2 == Approx(140.0f));  // 100 + 80/2
+}
+
+TEST_CASE("decodeYoloOutput filters out anchors below the confidence threshold", "[detector]") {
+    cv::Mat out = makeOutput(2, 1);
+    out.at<float>(0, 0) = 100.0f;
+    out.at<float>(1, 0) = 100.0f;
+    out.at<float>(2, 0) = 10.0f;
+    out.at<float>(3, 0) = 10.0f;
+    out.at<float>(4, 0) = 0.3f;
+    out.at<float>(5, 0) = 0.2f;  // best class score is 0.3, below threshold
+
+    auto boxes = decodeYoloOutput(out, 0.5f);
+    REQUIRE(boxes.empty());
+}
+
+TEST_CASE("decodeYoloOutput picks the correct argmax class and preserves anchor order", "[detector]") {
+    cv::Mat out = makeOutput(2, 3);
+    // Anchor 0: kept, class 1 wins (0.9 > 0.1)
+    out.at<float>(0, 0) = 100; out.at<float>(1, 0) = 100; out.at<float>(2, 0) = 50; out.at<float>(3, 0) = 80;
+    out.at<float>(4, 0) = 0.1f; out.at<float>(5, 0) = 0.9f;
+    // Anchor 1: filtered (best score 0.3 < threshold 0.5)
+    out.at<float>(0, 1) = 200; out.at<float>(1, 1) = 200; out.at<float>(2, 1) = 20; out.at<float>(3, 1) = 20;
+    out.at<float>(4, 1) = 0.3f; out.at<float>(5, 1) = 0.2f;
+    // Anchor 2: kept, class 0 wins (0.6 > 0.55) — close scores, verifies strict argmax, not a tie-break bug
+    out.at<float>(0, 2) = 300; out.at<float>(1, 2) = 300; out.at<float>(2, 2) = 40; out.at<float>(3, 2) = 40;
+    out.at<float>(4, 2) = 0.6f; out.at<float>(5, 2) = 0.55f;
+
+    auto boxes = decodeYoloOutput(out, 0.5f);
+    REQUIRE(boxes.size() == 2);
+    REQUIRE(boxes[0].classId == 1);
+    REQUIRE(boxes[0].confidence == Approx(0.9f));
+    REQUIRE(boxes[1].classId == 0);
+    REQUIRE(boxes[1].confidence == Approx(0.6f));
+}
+
+TEST_CASE("decodeYoloOutput rejects a tensor with too few rows to be valid", "[detector]") {
+    cv::Mat bad = cv::Mat::zeros(3, 10, CV_32F);  // only 3 rows — can't even hold 4 box coords
+    REQUIRE_THROWS_AS(decodeYoloOutput(bad, 0.5f), std::invalid_argument);
+}
+
+TEST_CASE("decodeYoloOutput on an all-zero tensor with a nonzero threshold returns nothing", "[detector]") {
+    cv::Mat out = makeOutput(10, 100);  // realistic scale: 10 classes, 100 anchors, everything zero
+    auto boxes = decodeYoloOutput(out, 0.25f);
+    REQUIRE(boxes.empty());
+}

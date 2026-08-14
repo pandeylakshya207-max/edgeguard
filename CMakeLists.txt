@@ -45,6 +45,7 @@ add_executable(edgeguard_tests
   tests/test_letterbox.cpp
   tests/test_labels.cpp
   tests/test_evaluator.cpp
+  tests/test_detector_decode.cpp
 )
 target_link_libraries(edgeguard_tests PRIVATE edgeguard_core Catch2::Catch2WithMain)
 

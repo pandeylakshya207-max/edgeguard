@@ -27,6 +27,16 @@ target_include_directories(edgeguard_core PUBLIC include)
 target_link_libraries(edgeguard_core PUBLIC ${OpenCV_LIBS})
 target_include_directories(edgeguard_core PUBLIC ${OpenCV_INCLUDE_DIRS})
 
+# Generates include/edgeguard/test_config.hpp (build-dir copy) with an
+# absolute EDGEGUARD_SOURCE_DIR path, so tests can reliably locate fixture
+# files under models/ regardless of the build directory's location or
+# the working directory tests are invoked from.
+configure_file(
+  ${CMAKE_SOURCE_DIR}/include/edgeguard/test_config.hpp.in
+  ${CMAKE_BINARY_DIR}/generated/edgeguard/test_config.hpp
+  @ONLY
+)
+
 # --- CLI application ---
 add_executable(edgeguard src/main.cpp)
 target_link_libraries(edgeguard PRIVATE edgeguard_core)
@@ -50,8 +60,10 @@ add_executable(edgeguard_tests
   tests/test_labels.cpp
   tests/test_evaluator.cpp
   tests/test_detector_decode.cpp
+  tests/test_detector_integration.cpp
 )
 target_link_libraries(edgeguard_tests PRIVATE edgeguard_core Catch2::Catch2WithMain)
+target_include_directories(edgeguard_tests PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 include(CTest)
 add_test(NAME edgeguard_tests COMMAND edgeguard_tests)

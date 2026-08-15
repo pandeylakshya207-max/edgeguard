@@ -71,6 +71,46 @@ TEST_CASE("decodeYoloOutput rejects a tensor with too few rows to be valid", "[d
     REQUIRE_THROWS_AS(decodeYoloOutput(bad, 0.5f), std::invalid_argument);
 }
 
+TEST_CASE("decodeYoloOutput skips an anchor with non-positive width or height instead of emitting an inverted box", "[detector]") {
+    // Regression test: an untrained/corrupted/adversarial model can
+    // legitimately produce a negative "width" or "height" value at some
+    // anchor (nothing in the tensor format itself prevents it) — the raw
+    // formula x2 = cx + w/2 would then produce x2 < x1, a geometrically
+    // inverted box, if decodeYoloOutput trusted the value blindly. Found
+    // via test_detector_integration.cpp's full-pipeline test against a
+    // real (if untrained) ONNX model, which is exactly the kind of thing
+    // a hand-picked "sensible" unit test wouldn't have exposed.
+    cv::Mat out = makeOutput(2, 2);
+    // Anchor 0: negative width — must be skipped.
+    out.at<float>(0, 0) = 100; out.at<float>(1, 0) = 100;
+    out.at<float>(2, 0) = -20.0f; out.at<float>(3, 0) = 30.0f;
+    out.at<float>(4, 0) = 0.9f; out.at<float>(5, 0) = 0.1f;
+    // Anchor 1: negative height — must be skipped.
+    out.at<float>(0, 1) = 200; out.at<float>(1, 1) = 200;
+    out.at<float>(2, 1) = 30.0f; out.at<float>(3, 1) = -20.0f;
+    out.at<float>(4, 1) = 0.9f; out.at<float>(5, 1) = 0.1f;
+
+    auto boxes = decodeYoloOutput(out, 0.5f);
+    REQUIRE(boxes.empty());
+
+    // Every box decodeYoloOutput ever returns must be geometrically
+    // valid, as a general property — checked here across a wider mix of
+    // valid and invalid anchors, not just the all-invalid case above.
+    cv::Mat mixed = makeOutput(2, 3);
+    mixed.at<float>(0, 0) = 50; mixed.at<float>(1, 0) = 50; mixed.at<float>(2, 0) = 10; mixed.at<float>(3, 0) = 10;
+    mixed.at<float>(4, 0) = 0.9f; mixed.at<float>(5, 0) = 0.0f;  // valid
+    mixed.at<float>(0, 1) = 60; mixed.at<float>(1, 1) = 60; mixed.at<float>(2, 1) = -5; mixed.at<float>(3, 1) = 10;
+    mixed.at<float>(4, 1) = 0.9f; mixed.at<float>(5, 1) = 0.0f;  // invalid: negative width
+    mixed.at<float>(0, 2) = 70; mixed.at<float>(1, 2) = 70; mixed.at<float>(2, 2) = 10; mixed.at<float>(3, 2) = 10;
+    mixed.at<float>(4, 2) = 0.9f; mixed.at<float>(5, 2) = 0.0f;  // valid
+    auto mixedBoxes = decodeYoloOutput(mixed, 0.5f);
+    REQUIRE(mixedBoxes.size() == 2);
+    for (const auto& b : mixedBoxes) {
+        REQUIRE(b.x2 >= b.x1);
+        REQUIRE(b.y2 >= b.y1);
+    }
+}
+
 TEST_CASE("decodeYoloOutput on an all-zero tensor with a nonzero threshold returns nothing", "[detector]") {
     cv::Mat out = makeOutput(10, 100);  // realistic scale: 10 classes, 100 anchors, everything zero
     auto boxes = decodeYoloOutput(out, 0.25f);

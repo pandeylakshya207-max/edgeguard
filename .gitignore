@@ -4,8 +4,11 @@
 *.obj
 *.exe
 
-# Models (large binaries — documented separately, not committed raw)
+# Models (large trained-model binaries — documented separately, not
+# committed raw; the tiny hand-built mock.onnx test fixture is an
+# intentional exception, see tests/test_detector_integration.cpp)
 *.onnx
+!models/mock.onnx
 *.weights
 *.pt
 

@@ -24,6 +24,19 @@ std::vector<BoundingBox> decodeYoloOutput(const cv::Mat& output, float confThres
         float w = output.at<float>(2, a);
         float h = output.at<float>(3, a);
 
+        // A real trained YOLOv8 model's box-regression head keeps w/h
+        // non-negative by construction, but decodeYoloOutput has no way
+        // to verify that assumption holds for whatever model file it's
+        // actually handed — an untrained, corrupted, or simply
+        // maliciously-crafted model could emit a negative width/height,
+        // which would silently produce a geometrically inverted box
+        // (x2 < x1) downstream. Skip it rather than trust it; this is
+        // the same "validate rather than assume" principle
+        // BoundingBox::area() already applies to degenerate boxes after
+        // construction, applied here at the point of construction
+        // instead.
+        if (w <= 0.0f || h <= 0.0f) continue;
+
         int bestClass = -1;
         float bestScore = 0.0f;
         for (int c = 0; c < numClasses; ++c) {

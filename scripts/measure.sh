@@ -64,6 +64,10 @@ echo "== accuracy: validation split, Ultralytics validation protocol (every clas
 tool "$cores" edgeguard_eval --model=ppe.onnx --data=valid --multi-label --nms=0.7
 
 echo
+echo "== accuracy: test split, Ultralytics validation protocol =="
+tool "$cores" edgeguard_eval --model=ppe.onnx --data=test --multi-label --nms=0.7
+
+echo
 echo "== latency: 1 thread, container limited to 1 CPU and $MEMORY =="
 tool 1 edgeguard_bench --model=ppe.onnx --image=sample.jpg --iters="$ITERS" --threads=1
 

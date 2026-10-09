@@ -4,10 +4,13 @@ int8, trading a small amount of accuracy for reduced model size and
 (usually) faster CPU inference — exactly the trade-off an edge deployment
 needs to measure honestly rather than assume.
 
-Unlike scripts/train_and_export.py, this one genuinely runs anywhere with
-onnxruntime installed (no PyTorch needed) — including this project's own
-environment, so its output can be directly fed into edgeguard_bench for a
-real, measured fp32-vs-int8 comparison, not an assumed percentage.
+It needs only onnxruntime (no PyTorch), and the `measure` workflow runs it.
+
+Known limitation: OpenCV 4.10 cannot load the model this produces. Dynamic
+quantization inserts DynamicQuantizeLinear nodes, which OpenCV's ONNX
+importer does not implement, so edgeguard cannot run the output yet. On the
+YOLOv8s measured in the README the file shrinks from 44.7 MB to 11.5 MB,
+and that is all that can be said about it for now.
 
 Usage:
     pip install onnxruntime

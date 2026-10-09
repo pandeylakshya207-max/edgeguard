@@ -17,9 +17,10 @@ trained by someone else; see [The model](#the-model).
 
 ## Results
 
-Measured by the [`measure`](.github/workflows/measure.yml) workflow on a
-GitHub-hosted runner (AMD EPYC 9V74, 4 cores), inside the Docker image this
-repository builds.
+Measured by the [`measure`](.github/workflows/measure.yml) workflow on
+GitHub-hosted runners (4 cores), inside the Docker image this repository
+builds. The workflow was run twice; the accuracy figures were identical in
+both runs.
 
 ### Accuracy
 
@@ -62,13 +63,19 @@ on both splits, and to within about 0.005 on every one of the ten classes:
 One 640x640 image, 200 timed runs after 10 warm-up runs, each run covering
 the full pipeline (letterbox, forward pass, decode, NMS).
 
-| Container limits | Threads | Mean | p50 | p95 | p99 | Throughput |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 CPU, 512 MB | 1 | 440 ms | 439 ms | 446 ms | 476 ms | 2.3 FPS |
-| 4 CPUs, 512 MB | 4 | 179 ms | 177 ms | 188 ms | 207 ms | 5.6 FPS |
+| Run | Container limits | Threads | Mean | p95 | Throughput |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | 1 CPU, 512 MB | 1 | 440 ms | 446 ms | 2.3 FPS |
+| 2 | 1 CPU, 512 MB | 1 | 325 ms | 340 ms | 3.1 FPS |
+| 1 | 4 CPUs, 512 MB | 4 | 179 ms | 188 ms | 5.6 FPS |
+| 2 | 4 CPUs, 512 MB | 4 | 129 ms | 132 ms | 7.7 FPS |
 
-Resident memory after inference was 360 MiB, inside the 512 MiB limit. The
-model file is 44.7 MB.
+The two runs differ by about a quarter. GitHub does not fix the hardware
+behind a hosted runner (the first run reported an AMD EPYC 9V74), so treat
+these as a range for a cloud CPU core, not as one number.
+
+Resident memory after inference was 360 MiB in both runs, inside the
+512 MiB limit. The model file is 44.7 MB.
 
 ### What the numbers say
 
@@ -77,11 +84,12 @@ model file is 44.7 MB.
 - Keeping only the best class per anchor, which is what a deployed detector
   wants, costs about one point of mAP on the validation split compared with
   the validator's protocol, and nothing on the test split.
-- On one core this model is not real-time: about two frames per second. It
+- On one core this model is not real-time: two to three frames per second. It
   is a YOLOv8s. The nano variant is several times smaller and would be
   faster, but no public nano checkpoint for this dataset was available, so
   that is not measured here.
-- Four cores give 2.5 times the single-core throughput, not 4 times.
+- Four cores give about 2.5 times the single-core throughput in both runs,
+  not 4 times.
 
 ### What did not work: int8 quantization
 
@@ -236,8 +244,8 @@ the test that covers a real model.
   trained here.
 - The splits are small (114 and 82 images), so per-class AP is noisy. Safety
   Cone scores 0.50 on the test split, where it appears in 8 images.
-- Latency was measured on a shared cloud VM, once. Expect it to vary between
-  runs and machines.
+- Latency was measured on shared cloud VMs, and two runs differed by about
+  25%. Expect it to vary between runs and machines.
 - There is no int8 result (see above).
 - The tools process single images. There is no video or camera pipeline.
 - `scripts/train_and_export.py` documents how to train and export a model

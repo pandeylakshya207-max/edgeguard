@@ -1,0 +1,146 @@
+name: measure
+
+# Runs the edgeguard tools on a real model and records what they report.
+# Started by hand (Actions tab, or `gh workflow run measure.yml`); it is not
+# part of the per-push CI because it downloads a 45 MB checkpoint and takes
+# several minutes.
+#
+# The checkpoint is a YOLOv8s trained on the Construction Site Safety
+# dataset and published, together with the dataset splits, in the
+# repository named below. It is downloaded for the run and is not stored in
+# this repository or in the uploaded results: Ultralytics-trained weights
+# are AGPL-3.0, and this repository is MIT.
+
+on:
+  workflow_dispatch:
+    inputs:
+      iters:
+        description: Benchmark iterations
+        default: "200"
+
+# `shell: bash` makes every step run with `set -o pipefail`, so a failing
+# command is not hidden by the `tee` after it.
+defaults:
+  run:
+    shell: bash
+
+env:
+  UPSTREAM_REPO: https://github.com/VoxDroid/Construction-Site-Safety-PPE-Detection.git
+  UPSTREAM_COMMIT: 9f4c9cf401806dcdd0e16fd7491f179f64e5b3a4
+  UPSTREAM_RUN: Model-Training/Outputs/runs/detect/yolov8s_ppe_css_200_epochs
+
+jobs:
+  measure:
+    name: Accuracy, latency and memory on a real model
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Build the deployment image
+        run: docker build -f docker/Dockerfile -t edgeguard .
+
+      - name: Fetch the checkpoint and the validation and test splits
+        run: |
+          git clone --quiet --filter=blob:none --no-checkout "$UPSTREAM_REPO" upstream
+          git -C upstream config gc.auto 0
+          git -C upstream sparse-checkout set --no-cone \
+            "/Model-Training/Dataset/valid/" \
+            "/Model-Training/Dataset/test/" \
+            "/$UPSTREAM_RUN/weights/best.onnx" \
+            "/$UPSTREAM_RUN/results.csv"
+          git -C upstream checkout --quiet "$UPSTREAM_COMMIT"
+          mkdir -p work results
+          cp "upstream/$UPSTREAM_RUN/weights/best.onnx" work/ppe.onnx
+          cp -r upstream/Model-Training/Dataset/valid upstream/Model-Training/Dataset/test work/
+          cp "work/valid/images/$(ls work/valid/images | sort | sed -n 5p)" work/sample.jpg
+          chmod -R a+rwX work
+          {
+            echo "== source =="
+            echo "repository: $UPSTREAM_REPO"
+            echo "commit: $UPSTREAM_COMMIT"
+            echo "checkpoint: $UPSTREAM_RUN/weights/best.onnx"
+            echo "sha256: $(sha256sum work/ppe.onnx | cut -d' ' -f1)"
+            echo "author's own validation metrics, last training epoch (precision, recall, mAP50, mAP50-95):"
+            echo "  $(tail -1 "upstream/$UPSTREAM_RUN/results.csv" | cut -d, -f6-9)"
+            echo
+          } | tee results/results.txt
+
+      - name: Measure with the edgeguard tools
+        env:
+          ITERS: ${{ inputs.iters }}
+        run: bash scripts/measure.sh work | tee -a results/results.txt
+
+      - name: Set up Python for the two reference steps
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # An independent implementation scoring the same model file on the same
+      # images. Allowed to fail: it is a cross-check, not part of edgeguard.
+      - name: "Reference: the Ultralytics validator on the same model file"
+        continue-on-error: true
+        run: |
+          pip install --quiet torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install --quiet ultralytics onnx onnxruntime
+          printf '%s\n' \
+            "path: $PWD/work" \
+            "train: valid/images" \
+            "val: valid/images" \
+            "test: test/images" \
+            "names:" \
+            "  0: Hardhat" "  1: Mask" "  2: NO-Hardhat" "  3: NO-Mask" "  4: NO-Safety Vest" \
+            "  5: Person" "  6: Safety Cone" "  7: Safety Vest" "  8: machinery" "  9: vehicle" \
+            > work/data.yaml
+          {
+            echo
+            for split in val test; do
+              echo "== reference: Ultralytics validator, $split split (columns: class, images, instances, precision, recall, mAP50, mAP50-95) =="
+              if yolo val model=work/ppe.onnx data=work/data.yaml imgsz=640 batch=1 device=cpu split=$split plots=False > results/ultralytics_$split.txt 2>&1; then
+                grep -E '^Ultralytics|([0-9]+ +){2}([0-9.]+ +){3}[0-9.]+ *$' results/ultralytics_$split.txt || tail -15 results/ultralytics_$split.txt
+              else
+                echo "the validator failed; last lines of its output:"
+                tail -15 results/ultralytics_$split.txt | cut -c1-300
+              fi
+              echo
+            done
+          } | tee -a results/results.txt
+
+      # The README used to promise an fp32-versus-int8 comparison. This step
+      # finds out whether OpenCV can run the dynamically quantized model at all.
+      - name: "Experiment: dynamic int8 quantization"
+        continue-on-error: true
+        run: |
+          pip install --quiet onnx onnxruntime
+          {
+            echo
+            echo "== experiment: dynamic int8 quantization =="
+            python scripts/quantize.py --model work/ppe.onnx --out work/ppe.int8.onnx 2>&1 | tail -3 || echo "quantization failed"
+            ls -l work/ppe.onnx work/ppe.int8.onnx | awk '{print $5, $9}' || true
+            chmod a+r work/ppe.int8.onnx || true
+            if docker run --rm --cpus=1 --memory=512m -v "$PWD/work":/work -w /work \
+                 --entrypoint /app/edgeguard_bench edgeguard \
+                 --model=ppe.int8.onnx --image=sample.jpg --iters=50 --threads=1 > results/int8.txt 2>&1; then
+              cat results/int8.txt
+            else
+              echo "OpenCV could not run the quantized model. First lines of its error:"
+              head -5 results/int8.txt | cut -c1-300
+            fi
+          } | tee -a results/results.txt
+
+      - name: Publish the results
+        if: always()
+        run: |
+          {
+            echo '```'
+            cat results/results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: results/

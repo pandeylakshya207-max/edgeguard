@@ -4,10 +4,13 @@
 //
 // Usage: edgeguard_bench --model=models/ppe.onnx --image=sample.jpg --iters=100
 
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <numeric>
+#include <opencv2/core/utility.hpp>
 #include <opencv2/imgcodecs.hpp>
 
 #include "edgeguard/detector.hpp"
@@ -42,6 +45,7 @@ int main(int argc, char** argv) {
         "{iters | 100             | number of inference iterations to average over}"
         "{warmup| 10              | warmup iterations, excluded from timing}"
         "{size  | 640             | model input size}"
+        "{threads | 1             | CPU threads OpenCV may use; 0 leaves OpenCV's default (all cores)}"
         "{help h|                 | show this help message}");
 
     if (parser.has("help") || !parser.has("image")) {
@@ -54,6 +58,11 @@ int main(int argc, char** argv) {
     int iters = parser.get<int>("iters");
     int warmup = parser.get<int>("warmup");
     int size = parser.get<int>("size");
+    int threads = parser.get<int>("threads");
+
+    // Without this OpenCV spreads the forward pass over every core, and a
+    // "single-core" latency figure would be nothing of the kind.
+    if (threads > 0) cv::setNumThreads(threads);
 
     cv::Mat image = cv::imread(imagePath);
     if (image.empty()) {
@@ -91,12 +100,13 @@ int main(int argc, char** argv) {
     std::cout << "  image: " << imagePath << " (" << image.cols << "x" << image.rows << ")\n";
     std::cout << "  input size: " << size << "x" << size << "\n";
     std::cout << "  iterations: " << iters << " (+" << warmup << " warmup, excluded)\n";
+    std::cout << "  OpenCV " << CV_VERSION << ", threads: " << cv::getNumThreads() << "\n";
     std::cout << "  --- latency ---\n";
     std::cout << "  mean: " << mean << " ms\n";
     std::cout << "  p50:  " << p50 << " ms\n";
     std::cout << "  p95:  " << p95 << " ms\n";
     std::cout << "  p99:  " << p99 << " ms\n";
-    std::cout << "  throughput: " << fps << " FPS (single-threaded)\n";
+    std::cout << "  throughput: " << fps << " FPS\n";
     std::cout << "  --- memory (RSS, /proc/self/status) ---\n";
     if (rssBeforeLoad >= 0) {
         std::cout << "  before model load: " << rssBeforeLoad << " kB\n";

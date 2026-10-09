@@ -70,5 +70,26 @@ TEST_CASE("Detector::detect runs the full pipeline end-to-end on a real image wi
         REQUIRE(box.confidence >= 0.001f);
         REQUIRE(box.x2 >= box.x1);
         REQUIRE(box.y2 >= box.y1);
+        // detections are clamped to the picture they came from
+        REQUIRE(box.x1 >= 0.0f);
+        REQUIRE(box.y1 >= 0.0f);
+        REQUIRE(box.x2 <= 720.0f);
+        REQUIRE(box.y2 <= 480.0f);
     }
+}
+
+TEST_CASE("Detector in multi-label mode returns at least as many boxes as in best-class mode",
+          "[detector][integration]") {
+    std::string path = mockModelPath();
+    if (path.empty()) {
+        WARN("models/mock.onnx not found — skipping (run scripts/make_mock_model.py first)");
+        return;
+    }
+    cv::Mat image(480, 720, CV_8UC3, cv::Scalar(120, 130, 140));
+    cv::rectangle(image, cv::Point(100, 100), cv::Point(300, 400), cv::Scalar(200, 50, 50), -1);
+
+    // NMS threshold 1.0 suppresses nothing, so the two counts compare the decoders alone.
+    edgeguard::Detector bestClass(path, 640, 0.001f, 1.0f);
+    edgeguard::Detector everyClass(path, 640, 0.001f, 1.0f, /*multiLabel=*/true);
+    REQUIRE(everyClass.detect(image).size() >= bestClass.detect(image).size());
 }

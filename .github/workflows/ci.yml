@@ -8,25 +8,24 @@ on:
 
 jobs:
   build-and-test:
-    name: Build (CMake + OpenCV) and run tests
+    name: Build the image (OpenCV 4.10) and run the tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      # The builder stage compiles everything and runs the test suite, so a
+      # failing test fails this step.
+      - name: Build the image
+        run: docker build --progress=plain -f docker/Dockerfile -t edgeguard .
+
+      - name: Run the tests again, for a readable log
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake libopencv-dev catch2
+          docker build -f docker/Dockerfile --target builder -t edgeguard-builder .
+          docker run --rm edgeguard-builder ./build/edgeguard_tests
 
-      - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build build -j"$(nproc)"
-
-      - name: Run tests
-        run: ./build/edgeguard_tests
-
-      - name: Run tests via ctest (for GitHub's test summary)
-        run: ctest --test-dir build --output-on-failure
+      - name: Start each tool in the runtime image under the deployment limits
+        run: |
+          docker run --rm --cpus=1 --memory=512m edgeguard --help
+          docker run --rm --cpus=1 --memory=512m --entrypoint /app/edgeguard_bench edgeguard --help
+          docker run --rm --cpus=1 --memory=512m --entrypoint /app/edgeguard_eval edgeguard --help

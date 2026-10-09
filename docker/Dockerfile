@@ -1,40 +1,42 @@
-# Multi-stage build: the builder stage has the full toolchain (cmake,
-# compiler, OpenCV dev headers); the runtime stage only has what's
-# actually needed to RUN the compiled binary (OpenCV's shared libraries,
-# not its headers/static libs/build tools) — this is what keeps the
-# final deployed image small, which is a real, measurable part of the
-# "edge deployment" story alongside latency and model size.
+# Two stages: the builder has the full toolchain and runs the test suite as
+# part of the build; the runtime stage carries only the OpenCV shared
+# libraries and the three binaries.
+#
+# Debian 13 (trixie) is used because it packages OpenCV 4.10. The OpenCV 4.6
+# in Ubuntu 24.04 cannot import a YOLOv8 ONNX export.
+#
+#   docker build -f docker/Dockerfile -t edgeguard .
+#   docker run --rm --cpus=1 --memory=512m -v "$PWD/work":/work -w /work \
+#       edgeguard --model=ppe.onnx --image=photo.jpg --out=result.jpg
+#
+# The other tools are selected with --entrypoint:
+#   docker run --rm --entrypoint /app/edgeguard_bench edgeguard --help
+#   docker run --rm --entrypoint /app/edgeguard_eval  edgeguard --help
 
-FROM ubuntu:24.04 AS builder
+FROM debian:trixie-slim AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake build-essential libopencv-dev catch2 \
     && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /src
 COPY CMakeLists.txt .
 COPY include include
 COPY src src
 COPY tests tests
-
+COPY models models
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build -j"$(nproc)" \
     && ./build/edgeguard_tests
 
-FROM ubuntu:24.04 AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libopencv-core406t64 libopencv-imgproc406t64 libopencv-imgcodecs406t64 \
-    libopencv-dnn406t64 libopencv-highgui406t64 \
+FROM debian:trixie-slim AS runtime
+# The runtime library packages carry the OpenCV version in their names
+# (libopencv-core410 and so on), so they are looked up rather than spelled out.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       $(apt-cache pkgnames | grep -E '^libopencv-(core|imgproc|imgcodecs|dnn|highgui)4[0-9]+(t64)?$') \
     && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
-COPY --from=builder /src/build/edgeguard /app/edgeguard
-COPY --from=builder /src/build/edgeguard_bench /app/edgeguard_bench
+COPY --from=builder /src/build/edgeguard /src/build/edgeguard_bench /src/build/edgeguard_eval /app/
 COPY models /app/models
-
-# No default CMD — this image is meant to be run with explicit
-# --model/--image arguments (see README), the same way the CLI works
-# outside a container. Resource limits are applied at `docker run` time
-# (--cpus, --memory), which is where this project's benchmarked
-# constrained-CPU numbers actually come from — see README's "Edge
-# deployment" section for the exact command and measured results.
+# Fails the build here, not at first use, if a shared library is missing.
+RUN /app/edgeguard --help > /dev/null && /app/edgeguard_bench --help > /dev/null && /app/edgeguard_eval --help > /dev/null
 ENTRYPOINT ["/app/edgeguard"]

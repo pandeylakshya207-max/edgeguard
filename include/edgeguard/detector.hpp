@@ -28,7 +28,14 @@ namespace edgeguard {
 // is responsible for unletterboxing them back to original-image
 // coordinates, and for running NMS (this function deliberately does
 // neither, so each concern stays independently testable).
-std::vector<BoundingBox> decodeYoloOutput(const cv::Mat& output, float confThreshold);
+//
+// With multiLabel = true, an anchor yields one box for EVERY class whose
+// score reaches confThreshold instead of only its best class. A deployed
+// detector wants the single best class; the multi-label form exists so
+// that edgeguard_eval can follow the same protocol as the Ultralytics
+// validator, which scores every class of every anchor.
+std::vector<BoundingBox> decodeYoloOutput(const cv::Mat& output, float confThreshold,
+                                           bool multiLabel = false);
 
 // Detector wraps a cv::dnn::Net loaded from an ONNX (or Darknet) model
 // file and runs the full detect pipeline: letterbox preprocess -> forward
@@ -39,7 +46,7 @@ std::vector<BoundingBox> decodeYoloOutput(const cv::Mat& output, float confThres
 class Detector {
  public:
     Detector(const std::string& modelPath, int inputSize, float confThreshold,
-             float nmsThreshold);
+             float nmsThreshold, bool multiLabel = false);
 
     std::vector<BoundingBox> detect(const cv::Mat& image);
 
@@ -48,6 +55,7 @@ class Detector {
     int inputSize_;
     float confThreshold_;
     float nmsThreshold_;
+    bool multiLabel_;
 };
 
 }  // namespace edgeguard

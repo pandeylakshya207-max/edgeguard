@@ -116,3 +116,40 @@ TEST_CASE("decodeYoloOutput on an all-zero tensor with a nonzero threshold retur
     auto boxes = decodeYoloOutput(out, 0.25f);
     REQUIRE(boxes.empty());
 }
+
+TEST_CASE("decodeYoloOutput in multi-label mode emits one box per class above the threshold", "[detector]") {
+    cv::Mat out = makeOutput(/*numClasses=*/3, /*numAnchors=*/2);
+    // Anchor 0: classes 0 and 2 clear the threshold, class 1 does not.
+    out.at<float>(0, 0) = 100; out.at<float>(1, 0) = 100; out.at<float>(2, 0) = 50; out.at<float>(3, 0) = 80;
+    out.at<float>(4, 0) = 0.7f; out.at<float>(5, 0) = 0.2f; out.at<float>(6, 0) = 0.6f;
+    // Anchor 1: nothing clears it.
+    out.at<float>(0, 1) = 200; out.at<float>(1, 1) = 200; out.at<float>(2, 1) = 20; out.at<float>(3, 1) = 20;
+    out.at<float>(4, 1) = 0.1f; out.at<float>(5, 1) = 0.2f; out.at<float>(6, 1) = 0.3f;
+
+    auto boxes = decodeYoloOutput(out, 0.5f, /*multiLabel=*/true);
+    REQUIRE(boxes.size() == 2);
+    REQUIRE(boxes[0].classId == 0);
+    REQUIRE(boxes[0].confidence == Approx(0.7f));
+    REQUIRE(boxes[1].classId == 2);
+    REQUIRE(boxes[1].confidence == Approx(0.6f));
+    // both boxes share the anchor's geometry
+    REQUIRE(boxes[0].x1 == Approx(75.0f));
+    REQUIRE(boxes[1].x1 == Approx(75.0f));
+    REQUIRE(boxes[1].y2 == Approx(140.0f));
+
+    // the default mode keeps only the best class of the same anchor
+    auto best = decodeYoloOutput(out, 0.5f);
+    REQUIRE(best.size() == 1);
+    REQUIRE(best[0].classId == 0);
+}
+
+TEST_CASE("decodeYoloOutput in multi-label mode still rejects degenerate boxes and zero scores", "[detector]") {
+    cv::Mat out = makeOutput(2, 2);
+    // Anchor 0: non-positive width.
+    out.at<float>(0, 0) = 100; out.at<float>(1, 0) = 100; out.at<float>(2, 0) = 0; out.at<float>(3, 0) = 80;
+    out.at<float>(4, 0) = 0.9f; out.at<float>(5, 0) = 0.9f;
+    // Anchor 1: valid box, all-zero scores, threshold zero.
+    out.at<float>(0, 1) = 200; out.at<float>(1, 1) = 200; out.at<float>(2, 1) = 20; out.at<float>(3, 1) = 20;
+
+    REQUIRE(decodeYoloOutput(out, 0.0f, /*multiLabel=*/true).empty());
+}

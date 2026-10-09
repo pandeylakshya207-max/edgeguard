@@ -10,6 +10,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <opencv2/core/utility.hpp>
 #include <opencv2/imgcodecs.hpp>
 
 #include "edgeguard/detector.hpp"
@@ -28,6 +29,9 @@ int main(int argc, char** argv) {
         "{nms   | 0.45            | NMS IoU threshold}"
         "{iou   | 0.5             | IoU threshold for counting a detection as a true positive}"
         "{size  | 640             | model input size}"
+        "{threads | 0             | CPU threads OpenCV may use; 0 leaves OpenCV's default (all cores)}"
+        "{multi-label |           | score every class of every anchor, as the Ultralytics validator does, "
+                                    "instead of only the best class per anchor}"
         "{help h|                 | show this help message}");
 
     if (parser.has("help") || !parser.has("data")) {
@@ -41,6 +45,9 @@ int main(int argc, char** argv) {
     float nms = parser.get<float>("nms");
     float iouThresh = parser.get<float>("iou");
     int size = parser.get<int>("size");
+    bool multiLabel = parser.has("multi-label");
+    int threads = parser.get<int>("threads");
+    if (threads > 0) cv::setNumThreads(threads);
 
     fs::path imagesDir = dataDir / "images";
     fs::path labelsDir = dataDir / "labels";
@@ -49,7 +56,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    edgeguard::Detector detector(modelPath, size, conf, nms);
+    edgeguard::Detector detector(modelPath, size, conf, nms, multiLabel);
 
     std::vector<edgeguard::Detection> allPredictions;
     std::vector<edgeguard::GroundTruth> allGroundTruth;
@@ -89,7 +96,8 @@ int main(int argc, char** argv) {
     std::cout << "\nedgeguard_eval — " << numImages << " images, "
               << allGroundTruth.size() << " ground-truth boxes, "
               << allPredictions.size() << " predictions (before per-class AP matching)\n";
-    std::cout << "IoU threshold: " << iouThresh << "\n\n";
+    std::cout << "IoU threshold: " << iouThresh << ", NMS threshold: " << nms << ", confidence >= " << conf
+              << ", " << (multiLabel ? "every class per anchor" : "best class per anchor") << "\n\n";
 
     auto result = edgeguard::meanAveragePrecision(allPredictions, allGroundTruth,
                                                     static_cast<int>(edgeguard::classNames().size()),

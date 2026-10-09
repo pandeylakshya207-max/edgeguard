@@ -45,7 +45,7 @@ src/                 implementations, plus 4 binaries:
   main.cpp             `edgeguard` — run detection on one image
   bench.cpp            `edgeguard_bench` — real latency/throughput/memory measurement
   eval.cpp             `edgeguard_eval` — mAP over a full validation split
-tests/                Catch2 unit tests — one file per module, 37 test cases
+tests/                Catch2 unit tests — one file per module, 43 test cases
 docker/               multi-stage Dockerfile (build toolchain vs. minimal runtime image)
 scripts/              dataset docs, training/export (Python+PyTorch), quantization (Python+onnxruntime)
 ```
@@ -59,8 +59,20 @@ it calls internally is already independently tested.
 
 ## Building
 
+The Docker image is the supported build. It compiles everything, runs the
+test suite as part of the build, and is what CI uses:
+
 ```bash
-sudo apt-get install cmake libopencv-dev catch2
+docker build -f docker/Dockerfile -t edgeguard .
+```
+
+To build directly you need CMake, Catch2 3 and **OpenCV 4.10 or newer**.
+Debian 13 packages all three. Ubuntu 24.04 packages OpenCV 4.6, which
+cannot import a YOLOv8 ONNX export (its importer fails on a Reshape node in
+the detection head), so the build refuses it:
+
+```bash
+sudo apt-get install cmake build-essential libopencv-dev catch2
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ./build/edgeguard_tests
@@ -90,7 +102,7 @@ is deliberate, not a limitation).
 ./build/edgeguard_tests          # or: ctest --test-dir build
 ```
 
-37 test cases, 97 assertions, all passing, zero compiler warnings under
+43 test cases, 117 assertions, all passing, zero compiler warnings under
 `-Wall -Wextra`. A few worth calling out specifically:
 
 - **Class-aware NMS is a dedicated, deliberately-tested design decision**,

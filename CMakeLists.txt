@@ -11,7 +11,11 @@ endif()
 
 add_compile_options(-Wall -Wextra -O2)
 
-find_package(OpenCV REQUIRED)
+# OpenCV 4.10 is the version this project is tested against. The 4.6 that
+# Ubuntu 24.04 packages cannot import a YOLOv8 ONNX export (its importer
+# fails on the Reshape node in the detection head), so an older OpenCV would
+# build and pass the unit tests and then fail on the first real model.
+find_package(OpenCV 4.10 REQUIRED)
 
 # --- core library: everything except main() and tests, so tests can link
 # against the exact same compiled code the CLI binary uses ---
